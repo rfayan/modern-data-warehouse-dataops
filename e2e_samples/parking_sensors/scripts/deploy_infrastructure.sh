@@ -189,14 +189,15 @@ echo "Retrieving KeyVault information from the deployment."
 kv_name=$(echo $arm_output | jq -r '.properties.outputs.keyvault_name.value')
 export KV_URL=https://$kv_name.vault.azure.net/
 
-echo "Updating Data Factory LinkedService to point to newly deployed resources (KeyVault and DataLake)."
+echo "Updating Data Factory LinkedService to point to newly deployed resources (KeyVault, Databricks and DataLake)."
 # Create a copy of the ADF dir into a .tmp/ folder.
 adfTempDir=.tmp/adf
 mkdir -p $adfTempDir && cp -a adf/ .tmp/
-# Update LinkedServices to point to newly deployed Datalake and KeyVault
+# Update LinkedServices to point to newly deployed Datalake, Databricks and KeyVault
 tmpfile=.tmpfile
 adfLsDir=$adfTempDir/linkedService
 jq --arg kvurl "$KV_URL" '.properties.typeProperties.baseUrl = $kvurl' $adfLsDir/Ls_KeyVault_01.json > "$tmpfile" && mv "$tmpfile" $adfLsDir/Ls_KeyVault_01.json
+jq --arg databricksDomain "$DATABRICKS_HOST" '.properties.typeProperties.domain = $databricksDomain' $adfLsDir/Ls_AzureDatabricks_01.json > "$tmpfile" && mv "$tmpfile" $adfLsDir/Ls_AzureDatabricks_01.json
 jq --arg datalakeUrl "https://$AZURE_STORAGE_ACCOUNT.dfs.core.windows.net" '.properties.typeProperties.url = $datalakeUrl' $adfLsDir/Ls_AdlsGen2_01.json > "$tmpfile" && mv "$tmpfile" $adfLsDir/Ls_AdlsGen2_01.json
 
 # Deploy ADF artifacts
@@ -206,17 +207,11 @@ export ADF_DIR=$adfTempDir
 
 # SP for integration tests
 sp_adf_name=$(echo $arm_output | jq -r '.properties.outputs.service_principal_datafactory_name.value')
-
-max_retry=36
-counter=1
-until sp_adf_out=$(az ad sp create-for-rbac --role "Data Factory contributor" --scopes "/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP_NAME/providers/Microsoft.DataFactory/factories/$DATAFACTORY_NAME" --name "$sp_adf_name" --output json)
-do
-   sleep 1
-   [[ counter -eq $max_retry ]] && echo "Failed!" && exit 1
-   echo "Command retry $counter/$max_retry"
-   ((counter++))
-done
-
+sp_adf_out=$(az ad sp create-for-rbac \
+    --role "Data Factory contributor" \
+    --scopes "/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP_NAME/providers/Microsoft.DataFactory/factories/$DATAFACTORY_NAME" \
+    --name "$sp_adf_name" \
+    --output json)
 export SP_ADF_ID=$(echo $sp_adf_out | jq -r '.appId')
 export SP_ADF_PASS=$(echo $sp_adf_out | jq -r '.password')
 export SP_ADF_TENANT=$(echo $sp_adf_out | jq -r '.tenant')
